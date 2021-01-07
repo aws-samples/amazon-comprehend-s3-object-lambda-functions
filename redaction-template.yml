@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: ComprehendPiiRedactionBannerLambda
+    Description: This serverless application deploys a Lambda which will provide capability to redact PII (Personally Identifiable Information) from a text file present in s3
+    Author: AWS Comprehend
+    # SPDX License Id, e.g., MIT, MIT-0, Apache-2.0. See https://spdx.org/licenses for more details
+    SpdxLicenseId: MIT-0
+    LicenseUrl: LICENSE
+    ReadmeUrl: REDACTION_README.md
+    Labels: [serverless]
+    HomePageUrl: https://aws.amazon.com/comprehend/
+    SemanticVersion: 0.0.4
+    SourceCodeUrl: https://github.com/aws-samples/amazon-comprehend-examples
+
+Parameters:
+  LogLevel:
+    Type: String
+    Description: Log level for Lambda function logging, e.g., ERROR, INFO, DEBUG, etc
+    Default: DEBUG
+  UnsupportedFileHandling:
+    Type: String
+    Description: Handling logic for Unsupported files. Valid values are PASS and FAIL
+    Default: PASS
+  MaxDocSizePiiClassification:
+    Type: Number
+    Description: Maximum document size (in bytes) to be used for making calls to Comprehend's ClassifyPiiDocument API
+    Default: 5000
+  MaxDocSizePiiDetection:
+    Type: Number
+    Description: Maximum document size (in bytes) to be used for making calls to Comprehend's DetectPiiEntities API
+    Default: 5000
+  PiiEntityTypes:
+    Type: String
+    Description: List of comma separated pii entity types to be considered for redaction.
+    Default: ALL
+  MaskCharacter:
+    Type: String
+    Description: A character that replaces each character in the redacted PII entity.
+    Default: '*'
+  MaskMode:
+    Type: String
+    Description: Specifies whether the PII entity is redacted with the mask character or the entity type. Valid values - REPLACE_WITH_PII_ENTITY_TYPE and MASK
+    Default: MASK
+  SubsegmentOverlappingTokens:
+    Type: Number
+    Description: Number of tokens/words to overlap among segments of a document in case chunking is needed because of maximum document size limit
+    Default: 20
+  DefaultMaxDocSize:
+    Type: Number
+    Description: Default maximum document size (in bytes) that this function can process otherwise with throw exception for too large document size.
+    Default: 102400
+  ConfidenceThreshold:
+    Type: Number
+    Description: The minimum prediction confidence score above which pii classification and detection would be considered as final answer
+    Default: 0.5
+  MaxCharsOverlap:
+    Type: Number
+    Description: Maximum characters to overlap among segments of a document in case chunking is needed because of maximum document size limit
+    Default: 200
+  DefaultLanguageCode:
+    Type: String
+    Description: Default language of the text to be processed. This code will be used for interacting.
+    Default: en
+  DetectPiiEntitiesThreadCount:
+    Type: Number
+    Description: Number of threads to use for calling Comprehend's DetectPiiEntities API. This controls the number of simultaneous calls tha will be made from this Lambda
+    Default: 10
+  ClassifyPiiDocThreadCount:
+    Type: Number
+    Description:  Number of threads to use for calling Comprehend's ClassifyPiiDocument API. This controls the number of simultaneous calls tha will be made from this Lambda
+    Default: 10
+  RedactionApiOnly:
+    Type: String
+    Description: This determines whether or not to only use DetectPiiEntities or use ClassifyPiiDocument first
+    Default: True
+  PublishCloudWatchMetrics:
+    Type: String
+    Description: True if publish metrics to cloudwatchs, false otherwise. See README.md for details on CloudWatch metrics.
+    Default: True
+  ComprehendEndpointUrl:
+    Type: String
+    Description: Override the default comprehend endpoint url. (Used for testing purposes)
+    Default: ""
+
+Resources:
+  PiiRedactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.redact_pii_documents_handler
+      Runtime: python3.8
+      Tracing: Active
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: ComprehendPiiDetectionPolicy
+              Effect: Allow
+              Action:
+                - comprehend:DetectPiiEntities
+                - comprehend:ClassifyPiiDocument
+              Resource: '*'
+            - Sid: S3AccessPointCallbackPolicy
+              Effect: Allow
+              Action:
+                - s3-banner:WriteGetObjectResponse
+              Resource: '*'
+            - Sid: CloudWatchMetricsPolicy
+              Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: '*'
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          UNSUPPORTED_FILE_HANDLING: !Ref UnsupportedFileHandling
+          MAX_DOC_SIZE_PII_CLASSIFICATION: !Ref MaxDocSizePiiClassification
+          MAX_DOC_SIZE_PII_DETECTION: !Ref MaxDocSizePiiDetection
+          PII_ENTITY_TYPES: !Ref PiiEntityTypes
+          MASK_CHARACTER: !Ref MaskCharacter
+          MASK_MODE: !Ref MaskMode
+          SUBSEGMENT_OVERLAPPING_TOKENS: !Ref SubsegmentOverlappingTokens
+          DEFAULT_MAX_DOC_SIZE: !Ref DefaultMaxDocSize
+          CONFIDENCE_THRESHOLD: !Ref ConfidenceThreshold
+          MAX_CHARS_OVERLAP: !Ref MaxCharsOverlap
+          DEFAULT_LANGUAGE_CODE: !Ref DefaultLanguageCode
+          DETECT_PII_ENTITIES_THREAD_COUNT: !Ref DetectPiiEntitiesThreadCount
+          CLASSIFY_PII_DOC_THREAD_COUNT: !Ref ClassifyPiiDocThreadCount
+          REDACTION_API_ONLY: !Ref RedactionApiOnly
+          PUBLISH_CLOUD_WATCH_METRICS: !Ref PublishCloudWatchMetrics
+          COMPREHEND_ENDPOINT_URL: !Ref ComprehendEndpointUrl
+
+Outputs:
+  PiiRedactionFunctionName:
+    Description: "Redaction Function Name"
+    Value: !Ref PiiRedactionFunction

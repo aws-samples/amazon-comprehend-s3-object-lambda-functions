@@ -1,0 +1,14 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:
+    - make init
+  build:
+    commands:
+    - make package
+artifacts:
+  files:
+    - .aws-sam/packaged-template.yml
+  discard-paths: yes
