@@ -3,8 +3,8 @@ Transform: AWS::Serverless-2016-10-31
 
 Metadata:
   AWS::ServerlessRepo::Application:
-    Name: ComprehendPiiAccessControlBannerLambda
-    Description: This serverless application deploys a Lambda which will provide capability to control access to PII (Personally Identifiable Information) from valid text files present in s3.
+    Name: ComprehendPiiAccessControlS3ObjectLambda
+    Description: Deploys a Lambda which will provide capability to control access to text files with PII (Personally Identifiable Information). This Lambda can be used as a s3 object lambda which will be triggered on get-object call when configured with access point
     Author: AWS Comprehend
     # SPDX License Id, e.g., MIT, MIT-0, Apache-2.0. See https://spdx.org/licenses for more details
     SpdxLicenseId: MIT-0
@@ -12,58 +12,58 @@ Metadata:
     ReadmeUrl: ACCESS_CONTROL_README.md
     Labels: [serverless]
     HomePageUrl: https://aws.amazon.com/comprehend/
-    SemanticVersion: 0.0.4
+    SemanticVersion: 0.0.8
     SourceCodeUrl: https://github.com/aws-samples/amazon-comprehend-examples
 
 Parameters:
   LogLevel:
     Type: String
-    Description: Log level for Lambda function logging, e.g., ERROR, INFO, DEBUG, etc
-    Default: DEBUG
+    Description: Log level for Lambda function logging, e.g., ERROR, INFO, DEBUG, etc.
+    Default: INFO
   UnsupportedFileHandling:
     Type: String
-    Description: Handling logic for Unsupported files. Valid values are PASS and FAIL
-    Default: PASS
-  MaxDocSizePiiClassification:
+    Description: Handling logic for Unsupported files. Valid values are PASS and FAIL.
+    Default: FAIL
+  IsPartialObjectSupported:
+    Type: String
+    Description: Whether to support partial objects or not. Accessing partial object through http headers such byte-range can corrupt the object and/or affect PII detection accuracy.
+    Default: FALSE
+  DocumentMaxSizeContainsPiiEntities:
     Type: Number
-    Description: Maximum document size (in bytes) to be used for making calls to Comprehend's ClassifyPiiDocument API
-    Default: 5000
+    Description: Maximum document size (in bytes) to be used for making calls to Comprehend's ContainsPiiEntities API.
+    Default: 50000
   PiiEntityTypes:
     Type: String
-    Description: List of comma separated pii entity types to be considered for redaction.
+    Description: List of comma separated PII entity types to be considered for redaction.
     Default: ALL
   SubsegmentOverlappingTokens:
     Type: Number
-    Description: Number of tokens/words to overlap among segments of a document in case chunking is needed because of maximum document size limit
+    Description: Number of tokens/words to overlap among segments of a document in case chunking is needed because of maximum document size limit.
     Default: 20
-  DefaultMaxDocSize:
+  DocumentMaxSize:
     Type: Number
-    Description: Default maximum document size (in bytes) that this function can process otherwise with throw exception for too large document size.
+    Description: Default maximum document size (in bytes) that this function can process otherwise will throw exception for too large document size.
     Default: 102400
   ConfidenceThreshold:
     Type: Number
-    Description: The minimum prediction confidence score above which pii classification and detection would be considered as final answer
+    Description: The minimum prediction confidence score above which PII classification and detection would be considered as final answer. Valid range (0.5 to 1.0).
     Default: 0.5
   MaxCharsOverlap:
     Type: Number
-    Description: Maximum characters to overlap among segments of a document in case chunking is needed because of maximum document size limit
+    Description: Maximum characters to overlap among segments of a document in case chunking is needed because of maximum document size limit.
     Default: 200
   DefaultLanguageCode:
     Type: String
-    Description: Default language of the text to be processed. This code will be used for interacting.
+    Description: Default language of the text to be processed. This code will be used for interacting with Comprehend.
     Default: en
-  ClassifyPiiDocThreadCount:
+  ContainsPiiEntitiesThreadCount:
     Type: Number
-    Description:  Number of threads to use for calling Comprehend's ClassifyPiiDocument API. This controls the number of simultaneous calls tha will be made from this Lambda
-    Default: 10
+    Description:  Number of threads to use for calling Comprehend's ContainsPiiEntities API. This controls the number of simultaneous calls that will be made from this Lambda.
+    Default: 20
   PublishCloudWatchMetrics:
     Type: String
-    Description: True if publish metrics to cloudwatchs, false otherwise. See README.md for details on CloudWatch metrics.
+    Description: True if publish metrics to Cloudwatch, false otherwise. See README.md for details on CloudWatch metrics.
     Default: True
-  ComprehendEndpointUrl:
-    Type: String
-    Description: Override the default comprehend endpoint url. (Used for testing purposes)
-    Default: ""
 
 Resources:
   PiiAccessControlFunction:
@@ -79,12 +79,12 @@ Resources:
             - Sid: ComprehendPiiDetectionPolicy
               Effect: Allow
               Action:
-                - comprehend:ClassifyPiiDocument
+                - comprehend:ContainsPiiEntities
               Resource: '*'
             - Sid: S3AccessPointCallbackPolicy
               Effect: Allow
               Action:
-                - s3-banner:WriteGetObjectResponse
+                - s3-object-lambda:WriteGetObjectResponse
               Resource: '*'
             - Sid: CloudWatchMetricsPolicy
               Effect: Allow
@@ -95,18 +95,18 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           UNSUPPORTED_FILE_HANDLING: !Ref UnsupportedFileHandling
-          MAX_DOC_SIZE_PII_CLASSIFICATION: !Ref MaxDocSizePiiClassification
+          IS_PARTIAL_OBJECT_SUPPORTED: !Ref IsPartialObjectSupported
+          DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES: !Ref DocumentMaxSizeContainsPiiEntities
           PII_ENTITY_TYPES: !Ref PiiEntityTypes
           SUBSEGMENT_OVERLAPPING_TOKENS: !Ref SubsegmentOverlappingTokens
-          DEFAULT_MAX_DOC_SIZE: !Ref DefaultMaxDocSize
+          DOCUMENT_MAX_SIZE: !Ref DocumentMaxSize
           CONFIDENCE_THRESHOLD: !Ref ConfidenceThreshold
           MAX_CHARS_OVERLAP: !Ref MaxCharsOverlap
           DEFAULT_LANGUAGE_CODE: !Ref DefaultLanguageCode
-          CLASSIFY_PII_DOC_THREAD_COUNT: !Ref ClassifyPiiDocThreadCount
+          CONTAINS_PII_ENTITIES_THREAD_COUNT: !Ref ContainsPiiEntitiesThreadCount
           PUBLISH_CLOUD_WATCH_METRICS: !Ref PublishCloudWatchMetrics
-          COMPREHEND_ENDPOINT_URL: !Ref ComprehendEndpointUrl
 
 Outputs:
   PiiAccessControlFunctionName:
-    Description: "Pii Access Control Function Name"
+    Description: "PII Access Control Function Name"
     Value: !Ref PiiAccessControlFunction

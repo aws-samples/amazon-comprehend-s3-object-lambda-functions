@@ -8,9 +8,10 @@ class CustomException(Exception):
 class UnsupportedFileException(CustomException):
     """Exception generated when we encounter an unsupported file format. For e.g. an image file."""
 
-    def __init__(self, file_content, *args, **kwargs):
+    def __init__(self, file_content, http_headers, *args, **kwargs):
         super().__init__(*args)
         self.file_content = file_content
+        self.http_headers = http_headers
 
 
 class FileSizeLimitExceededException(CustomException):
@@ -22,18 +23,34 @@ class FileSizeLimitExceededException(CustomException):
     pass
 
 
+class TimeoutException(CustomException):
+    """Exception raised when some task is not able to complete within a certain time limit."""
+
+    pass
+
+
 class InvalidConfigurationException(CustomException):
     """Exception representing an incorrect configuration of the access point such as incorrect function payload structure."""
 
-    pass
+    def __init__(self, message, *args, **kwargs):
+        super().__init__(*args)
+        self.message = message
+
+
+class InvalidRequestException(CustomException):
+    """Exception representing an invalid request."""
+
+    def __init__(self, message, *args, **kwargs):
+        super().__init__(*args)
+        self.message = message
 
 
 class S3DownloadException(CustomException):
     """Exception representing an error occurring during downloading from the presigned url."""
 
-    def __init__(self, s3_code, s3_message, *args, **kwargs):
+    def __init__(self, s3_error_code, s3_message, *args, **kwargs):
         super().__init__(*args)
-        self.s3_code = s3_code
+        self.s3_error_code = s3_error_code
         self.s3_message = s3_message
 
 

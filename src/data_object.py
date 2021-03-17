@@ -3,6 +3,8 @@
 import os
 from typing import List
 
+from exceptions import InvalidConfigurationException
+
 
 class PiiConfig:
     """PiiConfig class represents the base config for classification and redaction."""
@@ -12,6 +14,8 @@ class PiiConfig:
                  **kwargs):
         self.pii_entity_types = pii_entity_types
         self.confidence_threshold = float(confidence_threshold)
+        if not 0.5 <= self.confidence_threshold <= 1.0:
+            raise InvalidConfigurationException('CONFIDENCE_THRESHOLD is not within allowed range [0.5,1]')
         if self.pii_entity_types is None:
             self.pii_entity_types = os.getenv('PII_ENTITY_TYPES', 'ALL').split(',')
 

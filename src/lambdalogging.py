@@ -11,6 +11,11 @@ from config import LOG_LEVEL
 # translate log level from string to numeric value
 LOG_LEVEL = getattr(logging, LOG_LEVEL) if hasattr(logging, LOG_LEVEL) else logging.DEBUG
 
+# setup logging levels for botocore
+logging.getLogger('botocore.endpoint').setLevel(LOG_LEVEL)
+logging.getLogger('botocore.retryhandler').setLevel(LOG_LEVEL)
+logging.getLogger('botocore.parsers').setLevel(LOG_LEVEL)
+
 
 def getLogger(name):
     """Return a logger configured based on env variables."""

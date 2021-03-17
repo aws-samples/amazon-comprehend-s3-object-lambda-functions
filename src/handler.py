@@ -1,36 +1,29 @@
 """Lambda function handler."""
 
 # must be the first import in files with lambda function handlers
+import time
+import traceback
+
 import lambdainit  # noqa: F401
 import json
-from typing import List, Tuple
+from typing import List
 import lambdalogging
 from clients.comprehend_client import ComprehendClient
 from clients.s3_client import S3Client
 from clients.cloudwatch_client import CloudWatchClient
-from config import MAX_DOC_SIZE_PII_CLASSIFICATION, MAX_DOC_SIZE_PII_DETECTION, DEFAULT_LANGUAGE_CODE, \
+from config import DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES, DOCUMENT_MAX_SIZE_DETECT_PII_ENTITIES, DEFAULT_LANGUAGE_CODE, \
     PUBLISH_CLOUD_WATCH_METRICS, REDACTION_API_ONLY, COMPREHEND_ENDPOINT_URL
-from constants import ALL, REQUEST_ID, GET_OBJECT_CONTEXT, BANNER_ACCESS_POINT_ARN, \
-    INPUT_S3_URL, BANNER_CONFIGURATION, REQUEST_ROUTE, REQUEST_TOKEN, PAYLOAD, DEFAULT_USER_AGENT, LANGUAGE_CODE
+from constants import ALL, REQUEST_ID, GET_OBJECT_CONTEXT, S3OL_ACCESS_POINT_ARN, \
+    INPUT_S3_URL, S3OL_CONFIGURATION, REQUEST_ROUTE, REQUEST_TOKEN, PAYLOAD, DEFAULT_USER_AGENT, LANGUAGE_CODE, USER_REQUEST, \
+    HEADERS, CONTENT_LENGTH, RESERVED_TIME_FOR_CLEANUP
 from data_object import Document, PiiConfig, RedactionConfig, ClassificationConfig
-from exceptions import UnsupportedFileException, FileSizeLimitExceededException, InvalidConfigurationException, \
-    RestrictedDocumentException, S3DownloadException
-from exception_handlers import UnsupportedFileExceptionHandler, FileSizeLimitExceededExceptionHandler, ExceptionHandler, \
-    DefaultExceptionHandler, InvalidConfigurationExceptionHandler, RestrictedDocumentExceptionHandler, S3DownloadExceptionHandler
+from exception_handlers import ExceptionHandler
+from exceptions import RestrictedDocumentException
 from processors import Segmenter, Redactor
-from validators import InputEventValidator
+from util import execute_task_with_timeout
+from validators import InputEventValidator, PartialObjectRequestValidator
 
 LOG = lambdalogging.getLogger(__name__)
-
-
-def get_exception_handler(s3: S3Client) -> List[Tuple[Exception, ExceptionHandler]]:
-    """Get an ordered list of exception handlers."""
-    return [(UnsupportedFileException, UnsupportedFileExceptionHandler(s3)),
-            (FileSizeLimitExceededException, FileSizeLimitExceededExceptionHandler(s3)),
-            (InvalidConfigurationException, InvalidConfigurationExceptionHandler(s3)),
-            (S3DownloadException, S3DownloadExceptionHandler(s3)),
-            (RestrictedDocumentException, RestrictedDocumentExceptionHandler(s3)),
-            (Exception, DefaultExceptionHandler(s3))]
 
 
 def get_interested_pii(document: Document, classification_config: PiiConfig):
@@ -49,18 +42,18 @@ def get_interested_pii(document: Document, classification_config: PiiConfig):
 
 
 def publish_metrics(cloud_watch: CloudWatchClient, s3: S3Client, comprehend: ComprehendClient, processed_document: bool,
-                    processed_pii_document: bool, language_code: str, banner_access_point: str, pii_entities: List[str]):
+                    processed_pii_document: bool, language_code: str, s3ol_access_point: str, pii_entities: List[str]):
     """Publish metrics from the function execution."""
     try:
         cloud_watch.publish_metrics(s3.download_metrics.metrics + s3.write_get_object_metrics.metrics +
                                     comprehend.classify_metrics.metrics + comprehend.detection_metrics.metrics)
         if processed_document:
-            cloud_watch.put_document_processed_metric(language_code, banner_access_point)
+            cloud_watch.put_document_processed_metric(language_code, s3ol_access_point)
             if processed_pii_document:
-                cloud_watch.put_pii_document_processed_metric(language_code, banner_access_point)
-                cloud_watch.put_pii_document_types_metric(pii_entities, language_code, banner_access_point)
-    except Exception:
-        LOG.error("Error publishing metrics to cloudwatch.")
+                cloud_watch.put_pii_document_processed_metric(language_code, s3ol_access_point)
+                cloud_watch.put_pii_document_types_metric(pii_entities, language_code, s3ol_access_point)
+    except Exception as e:
+        LOG.error(f"Error publishing metrics to cloudwatch. :{e} {traceback.print_exc()}")
 
 
 def redact(text, classification_segmenter: Segmenter, detection_segmenter: Segmenter,
@@ -83,7 +76,7 @@ def redact(text, classification_segmenter: Segmenter, detection_segmenter: Segme
         documents = [doc]
         docs_for_entity_detection = detection_segmenter.segment(doc.text, doc.char_offset)
     else:
-        documents = comprehend.classify_pii_documents(classification_segmenter.segment(text), language_code)
+        documents = comprehend.contains_pii_entities(classification_segmenter.segment(text), language_code)
         pii_docs = [doc for doc in documents if len(get_interested_pii(doc, redaction_config)) > 0]
         if not pii_docs:
             LOG.debug("Document doesn't have any pii. Nothing to redact.")
@@ -114,7 +107,7 @@ def classify(text, classification_segmenter: Segmenter, comprehend: ComprehendCl
     3. If no pii detected, return empty list, else list of pii types found that is also in the detection config
        and above the given threshold
     """
-    pii_classified_documents = comprehend.classify_pii_documents(classification_segmenter.segment(text), language_code)
+    pii_classified_documents = comprehend.contains_pii_entities(classification_segmenter.segment(text), language_code)
     pii_types = set()
     for doc in pii_classified_documents:
         doc_pii_types = get_interested_pii(doc, detection_config)
@@ -125,75 +118,81 @@ def classify(text, classification_segmenter: Segmenter, comprehend: ComprehendCl
 def redact_pii_documents_handler(event, context):
     """Redaction Lambda function handler."""
     LOG.info('Received event with requestId: %s', event[REQUEST_ID])
-    LOG.debug('Complete event %s', event)
-    s3 = S3Client()
-    cloud_watch = CloudWatchClient()
-    comprehend = ComprehendClient(session_id=event[REQUEST_ID], user_agent=DEFAULT_USER_AGENT, endpoint_url=COMPREHEND_ENDPOINT_URL)
-
-    exception_handlers = get_exception_handler(s3)
+    LOG.debug('Raw event %s', event)
 
     InputEventValidator.validate(event)
-    invoke_args = json.loads(event[BANNER_CONFIGURATION][PAYLOAD])
+    invoke_args = json.loads(event[S3OL_CONFIGURATION][PAYLOAD]) if event[S3OL_CONFIGURATION][PAYLOAD] else {}
     language_code = invoke_args.get(LANGUAGE_CODE, DEFAULT_LANGUAGE_CODE)
     redaction_config = RedactionConfig(**invoke_args)
     object_get_context = event[GET_OBJECT_CONTEXT]
-    banner_access_point = event[BANNER_CONFIGURATION][BANNER_ACCESS_POINT_ARN]
+    s3ol_access_point = event[S3OL_CONFIGURATION][S3OL_ACCESS_POINT_ARN]
+    s3 = S3Client(s3ol_access_point)
+    cloud_watch = CloudWatchClient()
+    comprehend = ComprehendClient(s3ol_access_point=s3ol_access_point, session_id=event[REQUEST_ID], user_agent=DEFAULT_USER_AGENT,
+                                  endpoint_url=COMPREHEND_ENDPOINT_URL)
+
+    exception_handler = ExceptionHandler(s3)
 
     LOG.debug("Pii Entity Types to be redacted:" + str(redaction_config.pii_entity_types))
     processed_document = False
     document = Document('')
 
     try:
-        pii_classification_segmenter = Segmenter(MAX_DOC_SIZE_PII_CLASSIFICATION)
-        pii_redaction_segmenter = Segmenter(MAX_DOC_SIZE_PII_DETECTION)
-        redactor = Redactor(redaction_config)
+        def time_bound_task():
+            nonlocal processed_document
+            nonlocal document
+            PartialObjectRequestValidator.validate(event)
+            pii_classification_segmenter = Segmenter(DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES)
+            pii_redaction_segmenter = Segmenter(DOCUMENT_MAX_SIZE_DETECT_PII_ENTITIES)
+            redactor = Redactor(redaction_config)
+            time1 = time.time_ns()
+            text, http_headers, status_code = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL],
+                                                                                  event[USER_REQUEST][HEADERS])
+            time2 = time.time_ns()
+            LOG.debug(f"Downloaded the file in : {(time2 - time1) / 1000000} ms")
+            document = redact(text, pii_classification_segmenter, pii_redaction_segmenter, redactor,
+                              comprehend, redaction_config, language_code)
+            processed_document = True  # noqa: F841
+            time1 = time.time_ns()
+            LOG.debug(f"Redaction complete within {(time1 - time2) / 1000000} ms. Returning back the response to S3")
+            redacted_text_bytes = document.redacted_text.encode('utf-8')
+            http_headers[CONTENT_LENGTH] = len(redacted_text_bytes)
+            s3.respond_back_with_data(redacted_text_bytes, http_headers, object_get_context[REQUEST_ROUTE],
+                                      object_get_context[REQUEST_TOKEN], status_code)
 
-        text = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL])
-        document = redact(text, pii_classification_segmenter, pii_redaction_segmenter, redactor,
-                          comprehend, redaction_config, language_code)
-        processed_document = True
-        LOG.debug("Redaction complete. Returning back the response to S3")
-        s3.respond_back_with_data(document.redacted_text.encode('utf-8'), object_get_context[REQUEST_ROUTE],
-                                  object_get_context[REQUEST_TOKEN])
+        execute_task_with_timeout(context.get_remaining_time_in_millis() - RESERVED_TIME_FOR_CLEANUP, time_bound_task)
     except Exception as generated_exception:
-        for exception, exception_handler in exception_handlers:
-            if isinstance(generated_exception, exception):
-                exception_handler.handle_exception(generated_exception, object_get_context[REQUEST_ROUTE],
-                                                   object_get_context[REQUEST_TOKEN])
-                return
-        # No exception handler found
-        raise generated_exception
+        exception_handler.handle_exception(generated_exception, object_get_context[REQUEST_ROUTE], object_get_context[REQUEST_TOKEN])
     finally:
         if PUBLISH_CLOUD_WATCH_METRICS:
             pii_entities = get_interested_pii(document, redaction_config)
             publish_metrics(cloud_watch, s3, comprehend, processed_document, len(pii_entities) > 0, language_code,
-                            banner_access_point, pii_entities)
+                            s3ol_access_point, pii_entities)
 
-    LOG.info("Responded back to banner successfully")
+    LOG.info("Responded back to s3 successfully")
 
 
 def pii_access_control_handler(event, context):
     """Detect Lambda function handler."""
     LOG.info('Received event with requestId: %s', event[REQUEST_ID])
     LOG.debug('Complete event %s', event)
-    s3 = S3Client()
-    cloud_watch = CloudWatchClient()
-    comprehend = ComprehendClient(session_id=event[REQUEST_ID], user_agent=DEFAULT_USER_AGENT, endpoint_url=COMPREHEND_ENDPOINT_URL)
-
-    # The exceptions will be parsed in sequential order. The first matching exception's handler
-    # would be used to handle the exceptions
-    exception_handlers = get_exception_handler(s3)
 
     InputEventValidator.validate(event)
-    invoke_args = json.loads(event[BANNER_CONFIGURATION][PAYLOAD])
+    invoke_args = json.loads(event[S3OL_CONFIGURATION][PAYLOAD]) if event[S3OL_CONFIGURATION][PAYLOAD] else {}
     language_code = invoke_args.get(LANGUAGE_CODE, DEFAULT_LANGUAGE_CODE)
     detection_config = ClassificationConfig(**invoke_args)
     object_get_context = event[GET_OBJECT_CONTEXT]
-    banner_access_point = event[BANNER_CONFIGURATION][BANNER_ACCESS_POINT_ARN]
+    s3ol_access_point = event[S3OL_CONFIGURATION][S3OL_ACCESS_POINT_ARN]
+
+    s3 = S3Client(s3ol_access_point)
+    cloud_watch = CloudWatchClient()
+    comprehend = ComprehendClient(session_id=event[REQUEST_ID], user_agent=DEFAULT_USER_AGENT, endpoint_url=COMPREHEND_ENDPOINT_URL,
+                                  s3ol_access_point=s3ol_access_point)
+    exception_handler = ExceptionHandler(s3)
 
     LOG.debug("Pii Entity Types to be detected:" + str(detection_config.pii_entity_types))
 
-    pii_classification_segmenter = Segmenter(MAX_DOC_SIZE_PII_CLASSIFICATION)
+    pii_classification_segmenter = Segmenter(DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES)
 
     processed_document = False
     processed_pii_document = False
@@ -202,30 +201,37 @@ def pii_access_control_handler(event, context):
     LOG.debug("Pii Entity Types to be detected:" + str(detection_config.pii_entity_types))
 
     try:
-        comprehend = ComprehendClient(session_id=event[REQUEST_ID], user_agent=DEFAULT_USER_AGENT)
+        def time_bound_task():
+            nonlocal processed_document
+            nonlocal processed_pii_document
+            nonlocal pii_entities
+            PartialObjectRequestValidator.validate(event)
+            time1 = time.time_ns()
+            text, http_headers, status_code = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL],
+                                                                                  event[USER_REQUEST][HEADERS])
+            time2 = time.time_ns()
+            LOG.info(f"Downloaded the file in : {(time2 - time1) / 1000000} ms")
+            pii_entities = classify(text, pii_classification_segmenter, comprehend, detection_config, language_code)
+            time1 = time.time_ns()
 
-        text = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL])
-        pii_entities = classify(text, pii_classification_segmenter, comprehend, detection_config, language_code)
-        processed_document = True
-        LOG.debug("Detection complete. Returning back the response to S3")
-        if len(pii_entities) > 0:
-            processed_pii_document = True
-            raise RestrictedDocumentException()
-        else:
-            s3.respond_back_with_data(text.encode('utf-8'),
-                                      object_get_context[REQUEST_ROUTE],
-                                      object_get_context[REQUEST_TOKEN])
+            processed_document = True
+            LOG.info(f"Detection completed within {(time1 - time2) / 1000000} ms. Returning back the response to S3")
+            if len(pii_entities) > 0:
+                processed_pii_document = True
+                raise RestrictedDocumentException()
+            else:
+                text_bytes = text.encode('utf-8')
+                http_headers[CONTENT_LENGTH] = len(text_bytes)
+                s3.respond_back_with_data(text_bytes, http_headers, object_get_context[REQUEST_ROUTE],
+                                          object_get_context[REQUEST_TOKEN],
+                                          status_code)
+
+        execute_task_with_timeout(context.get_remaining_time_in_millis() - RESERVED_TIME_FOR_CLEANUP, time_bound_task)
     except Exception as generated_exception:
-        for exception, exception_handler in exception_handlers:
-            if isinstance(generated_exception, exception):
-                exception_handler.handle_exception(generated_exception, object_get_context[REQUEST_ROUTE],
-                                                   object_get_context[REQUEST_TOKEN])
-                return
-        # No exception handler found
-        raise generated_exception
+        exception_handler.handle_exception(generated_exception, object_get_context[REQUEST_ROUTE], object_get_context[REQUEST_TOKEN])
     finally:
         if PUBLISH_CLOUD_WATCH_METRICS:
             publish_metrics(cloud_watch, s3, comprehend, processed_document, processed_pii_document, language_code,
-                            banner_access_point, pii_entities)
+                            s3ol_access_point, pii_entities)
 
-    LOG.info("Responded back to banner successfully")
+    LOG.info("Responded back to s3 successfully")

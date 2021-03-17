@@ -12,12 +12,16 @@ ALL = "ALL"
 REPLACE_WITH_PII_ENTITY_TYPE = "REPLACE_WITH_PII_ENTITY_TYPE"
 MASK = "MASK"
 REQUEST_ID = "xAmzRequestId"
-REQUEST_ROUTE = "outputBannerRoute"
-REQUEST_TOKEN = "outputBannerToken"
+USER_REQUEST = "userRequest"
+HEADERS = "headers"
+RANGE = "Range"
+PART_NUMBER = "PartNumber"
+REQUEST_ROUTE = "outputRoute"
+REQUEST_TOKEN = "outputToken"
 GET_OBJECT_CONTEXT = "getObjectContext"
 INPUT_S3_URL = "inputS3Url"
-BANNER_CONFIGURATION = "bannerConfiguration"
-BANNER_ACCESS_POINT_ARN = "bannerAccessPointArn"
+S3OL_CONFIGURATION = "configuration"
+S3OL_ACCESS_POINT_ARN = "accessPointArn"
 CONTENT_LENGTH = "Content-Length"
 OVERLAP_TOKENS = "overlap_tokens"
 PAYLOAD = "payload"
@@ -25,15 +29,16 @@ ONE_DOC_PER_LINE = "ONE_DOC_PER_LINE"
 ONE_DOC_PER_FILE = "ONE_DOC_PER_FILE"
 LANGUAGE_CODE = "language_code"
 
-DEFAULT_USER_AGENT = "BannerLambda/1.0"
+DEFAULT_USER_AGENT = "S3ObjectLambda/1.0"
 
-COMPREHEND_MAX_RETRIES = 10
+RESERVED_TIME_FOR_CLEANUP = 2000   # We need at least this much time (in millis) to perform cleanup tasks like flushing the metrics
+COMPREHEND_MAX_RETRIES = 7
 S3_MAX_RETRIES = 10
-CLOUD_WATCH_NAMESPACE = "BannerLambda"
+CLOUD_WATCH_NAMESPACE = "ComprehendS3ObjectLambda"
 LATENCY = "Latency"
-FAULT_COUNT = "FaultCount"
+ERROR_COUNT = "ErrorCount"
 API = "API"
-CLASSIFY_PII_DOCUMENT = "ClassifyPiiDocument"
+CONTAINS_PII_ENTITIES = "ContainsPiiEntities"
 DETECT_PII_ENTITIES = "DetectPiiEntities"
 PII_DOCUMENTS_PROCESSED = "PiiDocumentsProcessed"
 DOCUMENTS_PROCESSED = "DocumentsProcessed"
@@ -48,7 +53,7 @@ LANGUAGE = "Language"
 MILLISECONDS = "Milliseconds"
 COUNT = "Count"
 VALUE = "Value"
-BANNER_ACCESS_POINT = "BannerAccessPoint"
+S3OL_ACCESS_POINT = "S3ObjectLambdaAccessPoint"
 METRIC_NAME = "MetricName"
 UNIT = "Unit"
 DIMENSIONS = "Dimensions"
@@ -88,6 +93,10 @@ class S3_STATUS_CODES(Enum):
     RANGE_NOT_SATISFIABLE_416 = auto()
     INTERNAL_SERVER_ERROR_500 = auto()
     SERVICE_UNAVAILABLE_503 = auto()
+
+    def get_http_status_code(self) -> int:
+        """Convert s3 status codes to integer http status codes."""
+        return int(self.name.split('_')[-1])
 
 
 class S3_ERROR_CODES(Enum):
@@ -276,3 +285,11 @@ def error_code_to_enums(error_code: str) -> Tuple[S3_STATUS_CODES, S3_ERROR_CODE
         if error_code == code.name:
             return status, code
     return S3_STATUS_CODES.INTERNAL_SERVER_ERROR_500, S3_ERROR_CODES.InternalError
+
+
+def http_status_code_to_s3_status_code(http_status_code: int) -> S3_STATUS_CODES:
+    """Convert http status codes to s3 status codes."""
+    for status_codes in S3_STATUS_CODES:
+        if str(http_status_code) == status_codes.name[-3:]:
+            return status_codes
+    return S3_STATUS_CODES.INTERNAL_SERVER_ERROR_500
