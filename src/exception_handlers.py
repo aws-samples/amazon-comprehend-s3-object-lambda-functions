@@ -39,18 +39,18 @@ class ExceptionHandler:
             self.s3_client.respond_back_with_error(S3_STATUS_CODES.BAD_REQUEST_400, S3_ERROR_CODES.InvalidRequest,
                                                    e.message, request_route, request_token)
         except S3DownloadException as e:
-            LOG.error(f"Error downloading from presigned url. {exception}", exc_info=True)
+            LOG.error(f"Error downloading from presigned url. {e}", exc_info=True)
             status_code, error_code = error_code_to_enums(e.s3_error_code)
             self.s3_client.respond_back_with_error(status_code, error_code, e.s3_message,
                                                    request_route, request_token)
-        except RestrictedDocumentException:
-            LOG.error(f"Document contains pii. {exception}", exc_info=True)
+        except RestrictedDocumentException as e:
+            LOG.error(f"Document contains pii. {e}", exc_info=True)
             self.s3_client.respond_back_with_error(S3_STATUS_CODES.FORBIDDEN_403,
                                                    S3_ERROR_CODES.AccessDenied,
                                                    "Document Contains PII",
                                                    request_route, request_token)
-        except TimeoutException:
-            LOG.error(f"Couldn't complete processing within the time limit. {exception}", exc_info=True)
+        except TimeoutException as e:
+            LOG.error(f"Couldn't complete processing within the time limit. {e}", exc_info=True)
             self.s3_client.respond_back_with_error(S3_STATUS_CODES.BAD_REQUEST_400,
                                                    S3_ERROR_CODES.RequestTimeout,
                                                    "Failed to complete document processing within time limit",

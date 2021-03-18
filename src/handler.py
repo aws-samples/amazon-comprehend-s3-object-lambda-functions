@@ -118,7 +118,7 @@ def classify(text, classification_segmenter: Segmenter, comprehend: ComprehendCl
 def redact_pii_documents_handler(event, context):
     """Redaction Lambda function handler."""
     LOG.info('Received event with requestId: %s', event[REQUEST_ID])
-    LOG.debug('Raw event %s', event)
+    LOG.debug(f'Raw event {event}')
 
     InputEventValidator.validate(event)
     invoke_args = json.loads(event[S3OL_CONFIGURATION][PAYLOAD]) if event[S3OL_CONFIGURATION][PAYLOAD] else {}
@@ -145,16 +145,16 @@ def redact_pii_documents_handler(event, context):
             pii_classification_segmenter = Segmenter(DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES)
             pii_redaction_segmenter = Segmenter(DOCUMENT_MAX_SIZE_DETECT_PII_ENTITIES)
             redactor = Redactor(redaction_config)
-            time1 = time.time_ns()
+            time1 = time.time()
             text, http_headers, status_code = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL],
                                                                                   event[USER_REQUEST][HEADERS])
-            time2 = time.time_ns()
-            LOG.debug(f"Downloaded the file in : {(time2 - time1) / 1000000} ms")
+            time2 = time.time()
+            LOG.info(f"Downloaded the file in : {(time2 - time1)} seconds")
             document = redact(text, pii_classification_segmenter, pii_redaction_segmenter, redactor,
                               comprehend, redaction_config, language_code)
-            processed_document = True  # noqa: F841
-            time1 = time.time_ns()
-            LOG.debug(f"Redaction complete within {(time1 - time2) / 1000000} ms. Returning back the response to S3")
+            processed_document = True
+            time1 = time.time()
+            LOG.info(f"Pii redaction completed within {(time1 - time2)} seconds. Returning back the response to S3")
             redacted_text_bytes = document.redacted_text.encode('utf-8')
             http_headers[CONTENT_LENGTH] = len(redacted_text_bytes)
             s3.respond_back_with_data(redacted_text_bytes, http_headers, object_get_context[REQUEST_ROUTE],
@@ -174,8 +174,8 @@ def redact_pii_documents_handler(event, context):
 
 def pii_access_control_handler(event, context):
     """Detect Lambda function handler."""
-    LOG.info('Received event with requestId: %s', event[REQUEST_ID])
-    LOG.debug('Complete event %s', event)
+    LOG.info(f'Received event with requestId: {event[REQUEST_ID]}')
+    LOG.debug(f'Raw event {event}')
 
     InputEventValidator.validate(event)
     invoke_args = json.loads(event[S3OL_CONFIGURATION][PAYLOAD]) if event[S3OL_CONFIGURATION][PAYLOAD] else {}
@@ -198,24 +198,22 @@ def pii_access_control_handler(event, context):
     processed_pii_document = False
     pii_entities = []
 
-    LOG.debug("Pii Entity Types to be detected:" + str(detection_config.pii_entity_types))
-
     try:
         def time_bound_task():
             nonlocal processed_document
             nonlocal processed_pii_document
             nonlocal pii_entities
             PartialObjectRequestValidator.validate(event)
-            time1 = time.time_ns()
+            time1 = time.time()
             text, http_headers, status_code = s3.download_file_from_presigned_url(object_get_context[INPUT_S3_URL],
                                                                                   event[USER_REQUEST][HEADERS])
-            time2 = time.time_ns()
-            LOG.info(f"Downloaded the file in : {(time2 - time1) / 1000000} ms")
+            time2 = time.time()
+            LOG.info(f"Downloaded the file in : {(time2 - time1)} seconds")
             pii_entities = classify(text, pii_classification_segmenter, comprehend, detection_config, language_code)
-            time1 = time.time_ns()
+            time1 = time.time()
 
             processed_document = True
-            LOG.info(f"Detection completed within {(time1 - time2) / 1000000} ms. Returning back the response to S3")
+            LOG.info(f"Pii detection completed within {(time1 - time2)} seconds. Returning back the response to S3")
             if len(pii_entities) > 0:
                 processed_pii_document = True
                 raise RestrictedDocumentException()

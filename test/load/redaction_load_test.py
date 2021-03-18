@@ -59,7 +59,7 @@ class PiiRedactionLoadTest(BaseLoadTest):
                       (50, True),
                       (1000, False),
                       (1000, True),
-                      (1500, False)
+                      (1500, False),
                       (1500, True)
                       ]
         for text_size, is_pii in variations:
