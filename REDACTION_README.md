@@ -35,7 +35,7 @@ Following environment variables for Lambda function can be set to get desired be
 1. `IS_PARTIAL_OBJECT_SUPPORTED` Whether to support partial objects or not. Accessing partial object through http headers such byte-range can corrupt the object and/or affect PII detection accuracy. Valid values are `TRUE` and `FALSE`. Default: `FALSE`.
 1. `DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES` Maximum document size (in bytes) to be used for making calls to Comprehend's ContainsPiiDocument API for classifying PII entity types present in the doc Default: 50000. 
 1. `DOCUMENT_MAX_SIZE_DETECT_PII_ENTITIES`: Maximum document size (in bytes) to be used for making calls to Comprehend's DetectPiiEntities API. Default: 5120 i.e. 5KB. 
-1. `PII_ENTITY_TYPES` : List of comma separated PII entity types to be considered for redaction. Default: `ALL`.
+1. `PII_ENTITY_TYPES` : List of comma separated PII entity types to be considered for redaction. Refer [Comprehend's documentation page](https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html#how-pii-types) for list of supported PII entity types. Default: `ALL` which signifies all entity types that comprehend supports.
 1. `MASK_CHARACTER` : A character that replaces each character in the redacted PII entity. Default: *.
 1. `MASK_MODE` : Specifies whether the PII entity is redacted with the mask character or the entity type. Valid values: `MASK` and `REPLACE_WITH_PII_ENTITY_TYPE`. Default: `MASK`.
 1. `SUBSEGMENT_OVERLAPPING_TOKENS` : Number of tokens/words to overlap among segments of a document in case chunking is needed because of maximum document size limit. Default: 20.

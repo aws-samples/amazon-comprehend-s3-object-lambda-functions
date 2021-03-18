@@ -10,10 +10,10 @@ Metadata:
     SpdxLicenseId: MIT-0
     LicenseUrl: LICENSE
     ReadmeUrl: ACCESS_CONTROL_README.md
-    Labels: [serverless]
+    Labels: [serverless,comprehend,nlp,pii]
     HomePageUrl: https://aws.amazon.com/comprehend/
-    SemanticVersion: 1.0.0
-    SourceCodeUrl: https://github.com/aws-samples/amazon-comprehend-examples
+    SemanticVersion: 1.0.2
+    SourceCodeUrl: https://github.com/aws-samples/amazon-comprehend-s3-object-lambda-functions
 
 Parameters:
   LogLevel:
@@ -34,7 +34,7 @@ Parameters:
     Default: 50000
   PiiEntityTypes:
     Type: String
-    Description: List of comma separated PII entity types to be considered for redaction.
+    Description: List of comma separated PII entity types to be considered for access control. Refer Comprehend's documentation page for list of supported PII entity types.
     Default: ALL
   SubsegmentOverlappingTokens:
     Type: Number

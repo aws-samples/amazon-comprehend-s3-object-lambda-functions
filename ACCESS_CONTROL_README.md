@@ -31,7 +31,7 @@ Following environment variables for Lambda function can be set to get desired be
 1. `UNSUPPORTED_FILE_HANDLING` Handling logic for Unsupported files. Valid values are `PASS` and `FAIL` (Default: `FAIL`). If set to `FAIL` it will throw UnsupportedFileException when the requested object is of unsupported type.
 1. `IS_PARTIAL_OBJECT_SUPPORTED` Whether to support partial objects or not. Accessing partial object through http headers such byte-range can corrupt the object and/or affect PII detection accuracy. Valid values are `TRUE` and `FALSE`. Default: `FALSE`.
 1. `DOCUMENT_MAX_SIZE_CONTAINS_PII_ENTITIES` Maximum document size (in bytes) to be used for making calls to Comprehend's ContainsPiiDocument API for classifying PII entity types present in the doc Default: 50000. 
-1. `PII_ENTITY_TYPES` : List of comma separated PII entity types to be considered for redaction. Default: `ALL`.
+1. `PII_ENTITY_TYPES` : List of comma separated PII entity types to be considered for access control. Refer [Comprehend's documentation page](https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html#how-pii-types) for list of supported PII entity types. Default: `ALL` which signifies all entity types that comprehend supports.
 1. `SUBSEGMENT_OVERLAPPING_TOKENS`  : Number of tokens/words to overlap among segments of a document in case chunking is needed because of maximum document size limit. Default: 20.
 1. `DOCUMENT_MAX_SIZE` : Default maximum document size (in bytes) that this function can process otherwise will throw exception for too large document size.
 1. `CONFIDENCE_THRESHOLD`  : The minimum prediction confidence score above which PII classification and detection would be considered as final answer. Valid range (0.5 to 1.0). Default: 0.5.
